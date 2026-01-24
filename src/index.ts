@@ -193,7 +193,7 @@ const server = new McpServer({
 // Tool 1: Generate Image using Nano Banana Pro
 server.tool(
   "generate_image",
-  "Generate an AI image using kie.ai Nano Banana Pro model. Returns the path to the downloaded image.",
+  "Generate an AI image from a text prompt. Use for: thumbnails, backgrounds, illustrations, product shots, concept art, or any visual asset. Supports multiple aspect ratios (1:1, 16:9, 9:16, etc.) and resolutions up to 4K. Can also use reference images for style guidance. Returns downloaded PNG path in public/ folder.",
   {
     prompt: z.string().describe("Text description of the image to generate"),
     output_name: z.string().describe("Output filename without extension (required)"),
@@ -302,7 +302,7 @@ server.tool(
 // Tool 2: Generate Video from Text using Veo 3.1
 server.tool(
   "generate_video_from_text",
-  "Generate an AI video from text prompt using kie.ai Veo 3.1. Returns the path to the downloaded video.",
+  "Generate an AI video from a text description. Use for: explainer clips, b-roll footage, animated scenes, product demos, or any video content. Creates ~8 second clips. Choose 'veo3' for quality or 'veo3_fast' for speed. Supports 16:9 (landscape), 9:16 (portrait/mobile). Returns downloaded MP4 path in public/ folder.",
   {
     prompt: z.string().describe("Text description of the video to generate"),
     output_name: z.string().describe("Output filename without extension (required)"),
@@ -395,7 +395,7 @@ server.tool(
 // Tool 3: Generate Video from Image using Veo 3.1
 server.tool(
   "generate_video_from_image",
-  "Generate an AI video from image(s) using kie.ai Veo 3.1. Supports 1 image (animate) or 2 images (transition between first and last frame).",
+  "Animate a still image into video, or create a video transition between two images. Use for: bringing photos to life, creating parallax effects, morphing between scenes, or animating illustrations. Pass 1 image URL to animate it, or 2 image URLs to transition from first to last frame. Returns downloaded MP4 path in public/ folder.",
   {
     prompt: z.string().describe("Text description of how the video should animate/transition"),
     image_urls: z
@@ -497,7 +497,7 @@ server.tool(
 // Tool 4: Generate Sound Effect using ElevenLabs SFX V2
 server.tool(
   "generate_sound_effect",
-  "Generate an AI sound effect using kie.ai ElevenLabs SFX V2. Returns the path to the downloaded audio file.",
+  "Generate a custom sound effect from a text description. Use for: whooshes, impacts, ambient sounds, UI sounds, nature sounds, mechanical noises, or any audio effect. Duration 0.5-22 seconds (auto if not specified). Supports seamless looping for background audio. Returns downloaded MP3 path in public/ folder.",
   {
     prompt: z
       .string()
@@ -618,7 +618,7 @@ server.tool(
 // Tool 5: Generate Music using Suno
 server.tool(
   "generate_music",
-  "Generate AI music using kie.ai Suno API. Returns the path to the downloaded audio file.",
+  "Generate original AI music from a description. Use for: background music, jingles, intros/outros, mood pieces, or full songs with vocals. Describe the genre, mood, instruments, tempo, or style. Set instrumental=true for no vocals. Uses Suno V5 for highest quality. Returns downloaded MP3 path in public/ folder.",
   {
     prompt: z
       .string()
@@ -718,7 +718,7 @@ server.tool(
 // Tool 6: Generate Speech using ElevenLabs Text-to-Speech
 server.tool(
   "generate_speech",
-  "Generate speech audio from text using ElevenLabs Text-to-Speech. Returns path to downloaded audio.",
+  "Convert text to natural-sounding speech audio (text-to-speech / TTS). Use for: voiceovers, narration, dialogue, announcements, or any spoken content. 21 voices available (default: Eric). Adjustable stability, similarity, and speed. Max 5000 characters. Returns downloaded MP3 path in public/ folder.",
   {
     text: z.string().max(5000).describe("Text to convert to speech (max 5000 chars)"),
     output_name: z.string().describe("Output filename without extension"),
@@ -845,7 +845,7 @@ server.tool(
 // Tool 7: List generated media
 server.tool(
   "list_generated_media",
-  "List all generated images, videos, and audio files in the public folder",
+  "List all generated media assets in the public/ folder. Shows images (PNG, JPG, WebP), videos (MP4, WebM, MOV), and audio files (MP3, WAV, OGG) organized by type. Use to check what assets have been created or to find file paths for use in projects.",
   {},
   async () => {
     const publicDir = path.resolve(process.cwd(), "public");
