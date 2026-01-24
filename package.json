@@ -1,0 +1,46 @@
+{
+  "name": "remotion-media-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for AI media generation in Remotion projects - images, videos, music, and sound effects",
+  "type": "module",
+  "bin": {
+    "remotion-media-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "remotion",
+    "ai",
+    "video-generation",
+    "image-generation",
+    "music-generation",
+    "sound-effects",
+    "veo3",
+    "suno",
+    "elevenlabs",
+    "model-context-protocol"
+  ],
+  "author": "Stephen Pope",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stephengpope/remotion-media-mcp.git"
+  },
+  "homepage": "https://github.com/stephengpope/remotion-media-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/stephengpope/remotion-media-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
