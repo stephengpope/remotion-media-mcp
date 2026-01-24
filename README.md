@@ -1,4 +1,4 @@
-# remotion-media-mcp
+# Remotion Media MCP
 
 An MCP (Model Context Protocol) server for AI-powered media generation in Remotion projects. Generate images, videos, music, and sound effects directly from Claude or any MCP-compatible client.
 
