@@ -54,7 +54,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 Add with a single command:
 
 ```bash
-claude mcp add remotion-media --local -e KIE_API_KEY=your-api-key -- npx remotion-media-mcp
+claude mcp add remotion-media -s project -e KIE_API_KEY=your-api-key -- npx remotion-media-mcp
 ```
 
 Or manually add to your project's `.mcp.json`:
