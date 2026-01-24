@@ -5,6 +5,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { execSync, exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 const API_BASE = "https://api.kie.ai";
 
@@ -73,6 +77,31 @@ async function downloadFile(url: string, outputPath: string): Promise<void> {
   }
 
   fs.writeFileSync(outputPath, Buffer.from(buffer));
+}
+
+// Check for Whisper installation and return the command name
+function getWhisperCommand(): { cmd: string; type: "whisper-cpp" | "openai-whisper" } | null {
+  // Check for whisper.cpp (Homebrew) - binary is called whisper-cli
+  try {
+    execSync("which whisper-cli", { stdio: "ignore" });
+    return { cmd: "whisper-cli", type: "whisper-cpp" };
+  } catch {}
+
+  // Check in Homebrew opt path
+  try {
+    const brewPath = "/opt/homebrew/opt/whisper-cpp/bin/whisper-cli";
+    if (fs.existsSync(brewPath)) {
+      return { cmd: brewPath, type: "whisper-cpp" };
+    }
+  } catch {}
+
+  // Check for OpenAI whisper (Python)
+  try {
+    execSync("which whisper", { stdio: "ignore" });
+    return { cmd: "whisper", type: "openai-whisper" };
+  } catch {}
+
+  return null;
 }
 
 // Poll for Veo video task completion
@@ -880,6 +909,267 @@ server.tool(
         },
       ],
     };
+  }
+);
+
+// Tool 8: Generate subtitles using local Whisper
+server.tool(
+  "generate_subtitles",
+  "Transcribe audio/video to SRT subtitles using local Whisper. Requires whisper-cpp (brew install whisper-cpp) or OpenAI whisper (pip install openai-whisper). Input file must be in public/ folder. Returns path to generated .srt file.",
+  {
+    input_file: z.string().describe("Filename in public/ folder (e.g., 'video.mp4' or 'audio.mp3')"),
+    output_name: z.string().optional().describe("Output filename without extension. Defaults to input filename"),
+    language: z.string().optional().describe("Language code (e.g., 'en', 'es', 'fr'). Auto-detects if not specified"),
+    model: z
+      .enum(["tiny", "base", "small", "medium", "large"])
+      .optional()
+      .describe("Whisper model size. tiny=fastest, large=most accurate. Default: base"),
+  },
+  async ({ input_file, output_name, language, model }) => {
+    try {
+      // 1. Check whisper is installed
+      const whisperInfo = getWhisperCommand();
+      if (!whisperInfo) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "Whisper not installed",
+                  message: "This tool requires whisper-cpp or openai-whisper to be installed locally.",
+                  install_instructions: {
+                    mac: "brew install whisper-cpp",
+                    pip: "pip install openai-whisper",
+                  },
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // 2. Verify input file exists in public/
+      const publicDir = path.resolve(process.cwd(), "public");
+      const inputPath = path.join(publicDir, input_file);
+
+      if (!fs.existsSync(inputPath)) {
+        // List available files for helpful error message
+        const availableFiles: string[] = [];
+        if (fs.existsSync(publicDir)) {
+          const files = fs.readdirSync(publicDir);
+          const mediaFiles = files.filter((f) =>
+            /\.(mp4|mp3|wav|webm|mov|m4a|ogg|flac|mkv|avi)$/i.test(f)
+          );
+          availableFiles.push(...mediaFiles);
+        }
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "File not found",
+                  message: `Could not find '${input_file}' in public/ folder`,
+                  available_files: availableFiles.length > 0 ? availableFiles : "No media files found",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // 3. Determine output filename
+      const baseName = output_name || path.basename(input_file, path.extname(input_file));
+      const outputSrtPath = path.join(publicDir, `${baseName}.srt`);
+      const modelSize = model || "base";
+
+      console.error(`[remotion-media-mcp] Starting subtitle generation with ${whisperInfo.type}...`);
+      console.error(`[remotion-media-mcp] Input: ${inputPath}`);
+      console.error(`[remotion-media-mcp] Model: ${modelSize}`);
+
+      let command: string;
+      let srtOutputPath: string;
+
+      if (whisperInfo.type === "whisper-cpp") {
+        // whisper.cpp command (whisper-cli)
+        // Look for models in common locations
+        const modelFileName = `ggml-${modelSize}.bin`;
+        const possibleModelPaths = [
+          path.join(process.cwd(), "models", modelFileName),
+          path.join(process.env.HOME || "", ".cache", "whisper", modelFileName),
+          `/opt/homebrew/share/whisper-cpp/models/${modelFileName}`,
+          path.join(process.cwd(), modelFileName),
+        ];
+
+        let modelPath: string | null = null;
+        for (const p of possibleModelPaths) {
+          if (fs.existsSync(p)) {
+            modelPath = p;
+            break;
+          }
+        }
+
+        // If model not found, download it
+        if (!modelPath) {
+          const modelsDir = path.join(process.cwd(), "models");
+          if (!fs.existsSync(modelsDir)) {
+            fs.mkdirSync(modelsDir, { recursive: true });
+          }
+          modelPath = path.join(modelsDir, modelFileName);
+
+          console.error(`[remotion-media-mcp] Model not found locally, downloading ${modelSize} model...`);
+
+          // Download model from Hugging Face
+          const modelUrl = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${modelFileName}`;
+          try {
+            const response = await fetch(modelUrl);
+            if (!response.ok) {
+              throw new Error(`Failed to download model: ${response.statusText}`);
+            }
+            const buffer = await response.arrayBuffer();
+            fs.writeFileSync(modelPath, Buffer.from(buffer));
+            console.error(`[remotion-media-mcp] Model downloaded to ${modelPath}`);
+          } catch (downloadError: any) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    {
+                      error: "Model download failed",
+                      message: `Could not download whisper model '${modelSize}'`,
+                      details: downloadError.message,
+                      manual_download: `Download from ${modelUrl} and place in ./models/`,
+                    },
+                    null,
+                    2
+                  ),
+                },
+              ],
+            };
+          }
+        }
+
+        // whisper-cli outputs to <output_prefix>.srt
+        const outputPrefix = path.join(publicDir, baseName);
+        srtOutputPath = `${outputPrefix}.srt`;
+
+        command = `"${whisperInfo.cmd}" -m "${modelPath}" -f "${inputPath}" -osrt -of "${outputPrefix}"`;
+        if (language) {
+          command += ` -l ${language}`;
+        }
+      } else {
+        // OpenAI whisper command
+        srtOutputPath = outputSrtPath;
+
+        command = `whisper "${inputPath}" --output_format srt --output_dir "${publicDir}" --model ${modelSize}`;
+        if (language) {
+          command += ` --language ${language}`;
+        }
+      }
+
+      console.error(`[remotion-media-mcp] Running: ${command}`);
+
+      // 4. Run whisper command
+      try {
+        const { stdout, stderr } = await execAsync(command, {
+          timeout: 600000, // 10 minute timeout
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        });
+
+        if (stderr) {
+          console.error(`[remotion-media-mcp] Whisper stderr: ${stderr}`);
+        }
+        if (stdout) {
+          console.error(`[remotion-media-mcp] Whisper stdout: ${stdout}`);
+        }
+      } catch (execError: any) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "Transcription failed",
+                  message: execError.message,
+                  stderr: execError.stderr,
+                  stdout: execError.stdout,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // For OpenAI whisper, rename output if needed
+      if (whisperInfo.type === "openai-whisper") {
+        const whisperDefaultOutput = path.join(
+          publicDir,
+          `${path.basename(input_file, path.extname(input_file))}.srt`
+        );
+        if (output_name && whisperDefaultOutput !== srtOutputPath) {
+          if (fs.existsSync(whisperDefaultOutput)) {
+            fs.renameSync(whisperDefaultOutput, srtOutputPath);
+          }
+        } else {
+          srtOutputPath = whisperDefaultOutput;
+        }
+      }
+
+      // 5. Verify output exists
+      if (!fs.existsSync(srtOutputPath)) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "Output not found",
+                  message: `Expected SRT file at ${srtOutputPath} but it was not created`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      console.error(`[remotion-media-mcp] Subtitles generated successfully!`);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                path: srtOutputPath,
+                relativePath: `public/${path.basename(srtOutputPath)}`,
+                whisperCommand: whisperInfo.type,
+                model: modelSize,
+                language: language || "auto-detected",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text" as const, text: `Error generating subtitles: ${message}` }],
+      };
+    }
   }
 );
 

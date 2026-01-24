@@ -8,6 +8,8 @@ An MCP (Model Context Protocol) server for AI-powered media generation in Remoti
 - **Video Generation** - Text-to-video and image-to-video via Veo 3.1
 - **Music Generation** - AI music via Suno (V3.5 - V5)
 - **Sound Effects** - AI sound effects via ElevenLabs SFX V2
+- **Text-to-Speech** - Natural voiceovers via ElevenLabs TTS
+- **Subtitle Generation** - Transcribe audio/video to SRT via local Whisper
 - **Asset Management** - List all generated media in your project
 
 ## Installation
@@ -123,6 +125,41 @@ Generate AI sound effects using ElevenLabs SFX V2.
 | `output_name` | string | Yes | Output filename (without extension) |
 | `duration_seconds` | number | No | Duration 0.5-22 seconds |
 | `loop` | boolean | No | Generate seamless loop (default: false) |
+
+### `generate_speech`
+
+Convert text to natural-sounding speech using ElevenLabs TTS.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `text` | string | Yes | Text to convert to speech (max 5000 chars) |
+| `output_name` | string | Yes | Output filename (without extension) |
+| `voice` | enum | No | Voice name (default: Eric). Options: Rachel, Aria, Roger, Sarah, Laura, Charlie, George, Callum, River, Liam, Charlotte, Alice, Matilda, Will, Jessica, Eric, Chris, Brian, Daniel, Lily, Bill |
+| `model` | enum | No | multilingual_v2 (quality) or turbo_v2_5 (default, faster) |
+| `stability` | number | No | Voice stability 0-1 (default: 0.5) |
+| `similarity_boost` | number | No | Voice similarity 0-1 (default: 0.75) |
+| `speed` | number | No | Speech speed 0.7-1.2 (default: 1.0) |
+
+### `generate_subtitles`
+
+Transcribe audio/video files to SRT subtitles using local Whisper. Requires [whisper.cpp](https://github.com/ggerganov/whisper.cpp) or [OpenAI Whisper](https://github.com/openai/whisper) to be installed.
+
+```bash
+# Install whisper.cpp (recommended)
+brew install whisper-cpp
+
+# Or install OpenAI Whisper
+pip install openai-whisper
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `input_file` | string | Yes | Filename in public/ folder (e.g., 'video.mp4') |
+| `output_name` | string | No | Output filename without extension (default: input filename) |
+| `language` | string | No | Language code e.g., 'en', 'es', 'fr' (default: auto-detect) |
+| `model` | enum | No | tiny, base (default), small, medium, large |
+
+**Note:** Models are automatically downloaded on first use (~75MB for base model).
 
 ### `list_generated_media`
 
