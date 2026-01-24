@@ -715,7 +715,134 @@ server.tool(
   }
 );
 
-// Tool 6: List generated media
+// Tool 6: Generate Speech using ElevenLabs Text-to-Speech
+server.tool(
+  "generate_speech",
+  "Generate speech audio from text using ElevenLabs Text-to-Speech. Returns path to downloaded audio.",
+  {
+    text: z.string().max(5000).describe("Text to convert to speech (max 5000 chars)"),
+    output_name: z.string().describe("Output filename without extension"),
+    voice: z
+      .enum([
+        "Rachel", "Aria", "Roger", "Sarah", "Laura", "Charlie",
+        "George", "Callum", "River", "Liam", "Charlotte", "Alice",
+        "Matilda", "Will", "Jessica", "Eric", "Chris", "Brian",
+        "Daniel", "Lily", "Bill"
+      ])
+      .optional()
+      .describe("Voice to use. Defaults to Eric"),
+    model: z
+      .enum(["multilingual_v2", "turbo_v2_5"])
+      .optional()
+      .describe("TTS model. multilingual = best quality, turbo = faster. Defaults to turbo_v2_5"),
+    stability: z.number().min(0).max(1).optional().describe("Voice stability 0-1. Lower = more expressive. Default 0.5"),
+    similarity_boost: z.number().min(0).max(1).optional().describe("Voice similarity 0-1. Higher = closer to original. Default 0.75"),
+    speed: z.number().min(0.7).max(1.2).optional().describe("Speech speed 0.7-1.2. Default 1.0"),
+  },
+  async ({ text, output_name, voice, model, stability, similarity_boost, speed }) => {
+    try {
+      const apiKey = getApiKey();
+      console.error(`[remotion-media-mcp] Starting speech generation: "${text.substring(0, 50)}..."`);
+
+      // Map model parameter to API model name
+      const modelMap: Record<string, string> = {
+        turbo_v2_5: "elevenlabs/text-to-speech-turbo-2-5",
+        multilingual_v2: "elevenlabs/text-to-speech-multilingual-v2",
+      };
+      const apiModel = modelMap[model || "turbo_v2_5"];
+
+      // Build input for the TTS model
+      const input: Record<string, any> = {
+        text,
+        voice: voice || "Eric",
+        stability: stability ?? 0.5,
+        similarity_boost: similarity_boost ?? 0.75,
+        speed: speed ?? 1.0,
+      };
+
+      // Create speech task using jobs/createTask
+      const createResponse = await fetch(`${API_BASE}/api/v1/jobs/createTask`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: apiModel,
+          input,
+        }),
+      });
+
+      const createResult = await createResponse.json();
+      console.error(`[remotion-media-mcp] API response:`, JSON.stringify(createResult, null, 2));
+
+      if (createResult.code !== 200) {
+        return {
+          content: [{ type: "text" as const, text: `Error creating speech task: ${createResult.msg || JSON.stringify(createResult)}` }],
+        };
+      }
+
+      const taskId = createResult.data?.taskId;
+      console.error(`[remotion-media-mcp] Speech task created: ${taskId}`);
+
+      // Poll for completion using standard polling
+      const pollResult = await pollTaskStatus(taskId, apiKey);
+
+      if (!pollResult.success) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${pollResult.error}` }],
+        };
+      }
+
+      // Extract audio URL from result
+      const resultJson = JSON.parse(pollResult.data.resultJson);
+      const audioUrl = resultJson.resultUrls?.[0] || resultJson.audio_url || resultJson.audioUrl;
+
+      if (!audioUrl) {
+        console.error(`[remotion-media-mcp] Result JSON:`, JSON.stringify(resultJson, null, 2));
+        return {
+          content: [{ type: "text" as const, text: "Error: No audio URL in response" }],
+        };
+      }
+
+      // Download audio
+      const filename = output_name || `speech-${Date.now()}`;
+      const outputPath = path.resolve(process.cwd(), "public", `${filename}.mp3`);
+
+      console.error(`[remotion-media-mcp] Downloading speech to ${outputPath}...`);
+      await downloadFile(audioUrl, outputPath);
+      console.error(`[remotion-media-mcp] Speech saved successfully!`);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                path: outputPath,
+                relativePath: `public/${filename}.mp3`,
+                taskId,
+                audioUrl,
+                voice: voice || "Eric",
+                model: model || "turbo_v2_5",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text" as const, text: `Error generating speech: ${message}` }],
+      };
+    }
+  }
+);
+
+// Tool 7: List generated media
 server.tool(
   "list_generated_media",
   "List all generated images, videos, and audio files in the public folder",
