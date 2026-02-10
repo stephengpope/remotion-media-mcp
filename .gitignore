@@ -1,6 +1,8 @@
 node_modules/
 dist/
 models/
+assets/
+public/
 *.log
 .DS_Store
 .env
