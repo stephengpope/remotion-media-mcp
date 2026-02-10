@@ -58,7 +58,7 @@ export async function createAirtableRecord(
     filename: string;
     mimeType: string;
   }
-): Promise<{ aid: string; recordId: string } | null> {
+): Promise<{ aid: string; assetFilename: string; recordId: string } | null> {
   try {
     const fields: Record<string, any> = {
       Filename: params.filename,
@@ -76,7 +76,8 @@ export async function createAirtableRecord(
     });
 
     const aid = result.fields?.AID || "";
-    return { aid, recordId: result.id };
+    const assetFilename = result.fields?.["Asset Filename"] || "";
+    return { aid, assetFilename, recordId: result.id };
   } catch (error) {
     console.error(
       `[remotion-media-mcp] Airtable create record failed:`,
@@ -111,7 +112,7 @@ export async function listAirtableRecords(
   queryParams.set("sort[0][direction]", "desc");
 
   // Request specific fields
-  const fields = ["AID", "ID", "Filename", "Description", "MIME Type", "File", "Record ID"];
+  const fields = ["AID", "ID", "Filename", "Asset Filename", "Description", "MIME Type", "File", "Record ID"];
   fields.forEach((f, i) => {
     queryParams.set(`fields[${i}]`, f);
   });

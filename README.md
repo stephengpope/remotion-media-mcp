@@ -10,8 +10,7 @@ An MCP (Model Context Protocol) server for AI-powered media generation in Remoti
 - **Sound Effects** - AI sound effects via ElevenLabs SFX V2
 - **Text-to-Speech** - Natural voiceovers via ElevenLabs TTS
 - **Subtitle Generation** - Transcribe audio/video to SRT via local Whisper
-- **Asset Management** - List all generated media in your project
-- **Airtable Integration** - Optional asset library with auto-tracking, AID assignment, and push/pull sync
+- **Asset Library** - Browse, back up, and pull assets with AID tracking via optional Airtable integration
 
 ## Installation
 
@@ -176,13 +175,9 @@ pip install openai-whisper
 
 **Note:** Models are automatically downloaded on first use (~75MB for base model).
 
-### `list_generated_media`
+### `list_assets`
 
-List all generated images, videos, and audio files in your project's `public/` folder.
-
-### `list_airtable_assets`
-
-Browse assets stored in the Airtable asset library. Requires Airtable integration to be configured.
+Browse assets stored in the asset library. Requires Airtable integration to be configured.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -190,9 +185,9 @@ Browse assets stored in the Airtable asset library. Requires Airtable integratio
 | `max_records` | number | No | Max records to return (default: 20, max: 100) |
 | `page_offset` | string | No | Pagination offset from previous call |
 
-### `backup_to_airtable`
+### `backup_asset`
 
-Push a local file to the Airtable asset library. Creates a record with metadata, uploads the file attachment, and assigns an AID. Files in `assets/` are automatically renamed with the AID prefix.
+Back up a local file to the asset library. Creates a record with metadata, uploads the file attachment, and assigns an AID. Files in `assets/` are automatically renamed with the AID prefix.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -201,9 +196,9 @@ Push a local file to the Airtable asset library. Creates a record with metadata,
 | `file_type` | enum | No | File type (auto-detected if not specified) |
 | `remote_url` | string | No | Remote URL to use as attachment instead of uploading |
 
-### `copy_from_airtable`
+### `get_asset`
 
-Pull a file from the Airtable asset library to a local directory by its AID.
+Pull an asset from the library by its AID.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -256,11 +251,15 @@ Connect an Airtable base to automatically track every generated asset with a uni
 - **AID assignment**: Each asset gets a unique AID (e.g., A1, A42) read back from the Airtable formula field
 - **Asset copy**: Generated files are copied to `assets/` with AID-prefixed filenames (e.g., `assets/A42-hero.png`) for traceability
 - **Non-blocking**: Airtable errors never break media generation — the file is always saved to `public/` regardless
-- **Push/pull**: Use `backup_to_airtable` to push local files and `copy_from_airtable` to pull files by AID
+- **Push/pull**: Use `backup_asset` to push local files and `get_asset` to pull files by AID
+
+### Limitations
+
+Airtable attachments are limited to 5MB on free plans and 100MB on paid plans. For larger files (long videos, lossless audio), a future version may support S3 or similar object storage as an intermediary, with Airtable storing only the metadata and a reference URL.
 
 ### Without Airtable
 
-If `AIRTABLE_API_KEY` is not set, the MCP works exactly as before. Generation tools save to `public/` only, and the three Airtable tools return a "not configured" message.
+If `AIRTABLE_API_KEY` is not set, the MCP works exactly as before. Generation tools save to `public/` only, and the asset library tools (`list_assets`, `backup_asset`, `get_asset`) return a "not configured" message.
 
 ## Development
 

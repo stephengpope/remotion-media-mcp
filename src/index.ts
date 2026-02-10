@@ -116,22 +116,22 @@ async function postGenerationHook(params: {
 
     if (!record) return null;
 
-    const { aid, recordId } = record;
+    const { aid, assetFilename, recordId } = record;
 
     // If no remote URL, try uploading the local file directly
     if (!params.remoteUrl && params.localPath && fs.existsSync(params.localPath)) {
       await uploadAttachmentToAirtable(config, recordId, params.localPath, params.filename);
     }
 
-    // Copy file to assets/ with AID prefix
+    // Copy file to assets/ with AID-prefixed filename from Airtable
     let assetsPath: string | undefined;
-    if (aid && fs.existsSync(params.localPath)) {
-      const assetsDir = path.resolve(process.cwd(), "assets");
+    const aidFilename = assetFilename || (aid ? `${aid}-${params.filename}` : null);
+    if (aidFilename && fs.existsSync(params.localPath)) {
+      const assetsDir = path.resolve(process.cwd(), "public");
       if (!fs.existsSync(assetsDir)) {
         fs.mkdirSync(assetsDir, { recursive: true });
       }
 
-      const aidFilename = `${aid}-${params.filename}`;
       assetsPath = path.join(assetsDir, aidFilename);
       fs.copyFileSync(params.localPath, assetsPath);
       console.error(`[remotion-media-mcp] Asset copied to ${assetsPath}`);
@@ -1024,48 +1024,7 @@ server.tool(
   }
 );
 
-// Tool 7: List generated media
-server.tool(
-  "list_generated_media",
-  "List all generated media assets in the public/ folder. Shows images (PNG, JPG, WebP), videos (MP4, WebM, MOV), and audio files (MP3, WAV, OGG) organized by type. Use to check what assets have been created or to find file paths for use in projects.",
-  {},
-  async () => {
-    const publicDir = path.resolve(process.cwd(), "public");
-
-    if (!fs.existsSync(publicDir)) {
-      return {
-        content: [{ type: "text" as const, text: "No public directory found." }],
-      };
-    }
-
-    const files = fs.readdirSync(publicDir);
-    const images = files.filter((f) => /\.(png|jpg|jpeg|webp)$/i.test(f));
-    const videos = files.filter((f) => /\.(mp4|webm|mov)$/i.test(f));
-    const audio = files.filter((f) => /\.(mp3|wav|ogg|m4a)$/i.test(f));
-
-    const output = [];
-    if (images.length > 0) {
-      output.push(`Images:\n${images.map((f) => `  - public/${f}`).join("\n")}`);
-    }
-    if (videos.length > 0) {
-      output.push(`Videos:\n${videos.map((f) => `  - public/${f}`).join("\n")}`);
-    }
-    if (audio.length > 0) {
-      output.push(`Audio:\n${audio.map((f) => `  - public/${f}`).join("\n")}`);
-    }
-
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: output.length > 0 ? output.join("\n\n") : "No generated media found.",
-        },
-      ],
-    };
-  }
-);
-
-// Tool 8: Generate subtitles using local Whisper
+// Tool 7: Generate subtitles using local Whisper
 server.tool(
   "generate_subtitles",
   "Transcribe audio/video to SRT subtitles using local Whisper. Requires whisper-cpp (brew install whisper-cpp) or OpenAI whisper (pip install openai-whisper). Input file must be in public/ folder. Returns path to generated .srt file.",
@@ -1326,10 +1285,10 @@ server.tool(
   }
 );
 
-// Tool 9: List Airtable Assets
+// Tool 8: List Assets
 server.tool(
-  "list_airtable_assets",
-  "Browse assets stored in the Airtable asset library. Shows AID, filename, description, file type, and creation date. Supports filtering by file type and pagination. Requires AIRTABLE_API_KEY to be configured.",
+  "list_assets",
+  "Browse assets stored in the asset library. Shows AID, filename, description, file type, and creation date. Supports filtering by file type and pagination. Requires AIRTABLE_API_KEY to be configured.",
   {
     file_type: z
       .enum(["image", "video", "audio", "subtitle", "other"])
@@ -1426,10 +1385,10 @@ server.tool(
   }
 );
 
-// Tool 10: Backup to Airtable
+// Tool 9: Backup Asset
 server.tool(
-  "backup_to_airtable",
-  "Push a local file to the Airtable asset library. Supports files from assets/, out/, public/, or any relative path. Creates an Airtable record with metadata and file attachment, assigns an AID, and optionally renames the local file with the AID prefix. Requires AIRTABLE_API_KEY to be configured.",
+  "backup_asset",
+  "Back up a local file to the asset library. Supports files from assets/, out/, public/, or any relative path. Creates a record with metadata and file attachment, assigns an AID, and optionally renames the local file with the AID prefix. Requires AIRTABLE_API_KEY to be configured.",
   {
     file_path: z
       .string()
@@ -1470,7 +1429,7 @@ server.tool(
 
       // Resolve the file path - search common directories
       let resolvedPath: string | null = null;
-      const searchDirs = ["assets", "out", "public"];
+      const searchDirs = ["public", "out"];
       const cwd = process.cwd();
 
       if (path.isAbsolute(file_path)) {
@@ -1583,10 +1542,10 @@ server.tool(
   }
 );
 
-// Tool 11: Copy from Airtable
+// Tool 10: Get Asset
 server.tool(
-  "copy_from_airtable",
-  "Pull a file from the Airtable asset library to a local directory. Look up an asset by its AID (e.g., 'A42'), download the attachment, and save it locally with the AID-prefixed filename. Requires AIRTABLE_API_KEY to be configured.",
+  "get_asset",
+  "Pull an asset from the library by its AID. Downloads the attachment and saves it locally with the AID-prefixed filename. Requires AIRTABLE_API_KEY to be configured.",
   {
     aid: z
       .string()
@@ -1673,12 +1632,10 @@ server.tool(
         : `${aidPrefix}${originalFilename}`;
 
       // Resolve target directory
-      const dirName = target_dir || "assets";
+      const dirName = target_dir || "public";
       let targetDirPath: string;
       if (path.isAbsolute(dirName)) {
         targetDirPath = dirName;
-      } else if (["assets", "out", "public"].includes(dirName)) {
-        targetDirPath = path.resolve(process.cwd(), dirName);
       } else {
         targetDirPath = path.resolve(process.cwd(), dirName);
       }
