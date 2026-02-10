@@ -3,3 +3,5 @@ dist/
 models/
 *.log
 .DS_Store
+.env
+.mcp.json

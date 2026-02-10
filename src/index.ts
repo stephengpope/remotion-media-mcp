@@ -7,6 +7,16 @@ import * as fs from "fs";
 import * as path from "path";
 import { execSync, exec } from "child_process";
 import { promisify } from "util";
+import {
+  getAirtableConfig,
+  createAirtableRecord,
+  listAirtableRecords,
+  getAirtableRecordByAid,
+  uploadAttachmentToAirtable,
+  detectFileType,
+  getMimeType,
+  type AirtableConfig,
+} from "./airtable.js";
 
 const execAsync = promisify(exec);
 
@@ -77,6 +87,65 @@ async function downloadFile(url: string, outputPath: string): Promise<void> {
   }
 
   fs.writeFileSync(outputPath, Buffer.from(buffer));
+}
+
+// Post-generation hook: optionally save to Airtable and copy to assets/
+async function postGenerationHook(params: {
+  remoteUrl?: string;
+  localPath: string;
+  filename: string;
+  description: string;
+  fileType: string;
+  sourceTool: string;
+  taskId?: string;
+}): Promise<{ aid?: string; recordId?: string; assetsPath?: string } | null> {
+  try {
+    const config = getAirtableConfig();
+    if (!config) return null;
+
+    // Determine MIME type
+    const mimeType = getMimeType(params.filename);
+
+    // Create Airtable record (use remote URL as attachment if available)
+    const record = await createAirtableRecord(config, {
+      description: params.description,
+      fileUrl: params.remoteUrl,
+      filename: params.filename,
+      mimeType,
+    });
+
+    if (!record) return null;
+
+    const { aid, recordId } = record;
+
+    // If no remote URL, try uploading the local file directly
+    if (!params.remoteUrl && params.localPath && fs.existsSync(params.localPath)) {
+      await uploadAttachmentToAirtable(config, recordId, params.localPath, params.filename);
+    }
+
+    // Copy file to assets/ with AID prefix
+    let assetsPath: string | undefined;
+    if (aid && fs.existsSync(params.localPath)) {
+      const assetsDir = path.resolve(process.cwd(), "assets");
+      if (!fs.existsSync(assetsDir)) {
+        fs.mkdirSync(assetsDir, { recursive: true });
+      }
+
+      const aidFilename = `${aid}-${params.filename}`;
+      assetsPath = path.join(assetsDir, aidFilename);
+      fs.copyFileSync(params.localPath, assetsPath);
+      console.error(`[remotion-media-mcp] Asset copied to ${assetsPath}`);
+    }
+
+    console.error(`[remotion-media-mcp] Airtable record created: ${aid} (${recordId})`);
+    return { aid, recordId, assetsPath };
+  } catch (error) {
+    console.error(
+      `[remotion-media-mcp] postGenerationHook error (non-fatal):`,
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
 }
 
 // Check for Whisper installation and return the command name
@@ -301,6 +370,17 @@ server.tool(
       await downloadFile(imageUrl, outputPath);
       console.error(`[remotion-media-mcp] Image saved successfully!`);
 
+      // Airtable post-generation hook
+      const postResult = await postGenerationHook({
+        remoteUrl: imageUrl,
+        localPath: outputPath,
+        filename: `${filename}.png`,
+        description: prompt,
+        fileType: "image",
+        sourceTool: "generate_image",
+        taskId,
+      });
+
       return {
         content: [
           {
@@ -312,6 +392,9 @@ server.tool(
                 relativePath: `public/${filename}.png`,
                 taskId,
                 imageUrl,
+                ...(postResult?.aid && { aid: postResult.aid }),
+                ...(postResult?.recordId && { airtableRecordId: postResult.recordId }),
+                ...(postResult?.assetsPath && { assetsPath: postResult.assetsPath }),
               },
               null,
               2
@@ -394,6 +477,17 @@ server.tool(
       await downloadFile(pollResult.videoUrl!, outputPath);
       console.error(`[remotion-media-mcp] Video saved successfully!`);
 
+      // Airtable post-generation hook
+      const postResult = await postGenerationHook({
+        remoteUrl: pollResult.videoUrl,
+        localPath: outputPath,
+        filename: `${filename}.mp4`,
+        description: prompt,
+        fileType: "video",
+        sourceTool: "generate_video_from_text",
+        taskId,
+      });
+
       return {
         content: [
           {
@@ -405,6 +499,9 @@ server.tool(
                 relativePath: `public/${filename}.mp4`,
                 taskId,
                 videoUrl: pollResult.videoUrl,
+                ...(postResult?.aid && { aid: postResult.aid }),
+                ...(postResult?.recordId && { airtableRecordId: postResult.recordId }),
+                ...(postResult?.assetsPath && { assetsPath: postResult.assetsPath }),
               },
               null,
               2
@@ -496,6 +593,17 @@ server.tool(
       await downloadFile(pollResult.videoUrl!, outputPath);
       console.error(`[remotion-media-mcp] Video saved successfully!`);
 
+      // Airtable post-generation hook
+      const postResult = await postGenerationHook({
+        remoteUrl: pollResult.videoUrl,
+        localPath: outputPath,
+        filename: `${filename}.mp4`,
+        description: prompt,
+        fileType: "video",
+        sourceTool: "generate_video_from_image",
+        taskId,
+      });
+
       return {
         content: [
           {
@@ -507,6 +615,9 @@ server.tool(
                 relativePath: `public/${filename}.mp4`,
                 taskId,
                 videoUrl: pollResult.videoUrl,
+                ...(postResult?.aid && { aid: postResult.aid }),
+                ...(postResult?.recordId && { airtableRecordId: postResult.recordId }),
+                ...(postResult?.assetsPath && { assetsPath: postResult.assetsPath }),
               },
               null,
               2
@@ -617,6 +728,17 @@ server.tool(
       await downloadFile(audioUrl, outputPath);
       console.error(`[remotion-media-mcp] Sound effect saved successfully!`);
 
+      // Airtable post-generation hook
+      const postResult = await postGenerationHook({
+        remoteUrl: audioUrl,
+        localPath: outputPath,
+        filename: `${filename}.mp3`,
+        description: prompt,
+        fileType: "audio",
+        sourceTool: "generate_sound_effect",
+        taskId,
+      });
+
       return {
         content: [
           {
@@ -628,6 +750,9 @@ server.tool(
                 relativePath: `public/${filename}.mp3`,
                 taskId,
                 audioUrl,
+                ...(postResult?.aid && { aid: postResult.aid }),
+                ...(postResult?.recordId && { airtableRecordId: postResult.recordId }),
+                ...(postResult?.assetsPath && { assetsPath: postResult.assetsPath }),
               },
               null,
               2
@@ -714,6 +839,17 @@ server.tool(
       await downloadFile(pollResult.audioUrl!, outputPath);
       console.error(`[remotion-media-mcp] Music saved successfully!`);
 
+      // Airtable post-generation hook
+      const postResult = await postGenerationHook({
+        remoteUrl: pollResult.audioUrl,
+        localPath: outputPath,
+        filename: `${filename}.mp3`,
+        description: prompt,
+        fileType: "audio",
+        sourceTool: "generate_music",
+        taskId,
+      });
+
       return {
         content: [
           {
@@ -728,6 +864,9 @@ server.tool(
                 title: pollResult.title,
                 duration: pollResult.duration,
                 imageUrl: pollResult.imageUrl,
+                ...(postResult?.aid && { aid: postResult.aid }),
+                ...(postResult?.recordId && { airtableRecordId: postResult.recordId }),
+                ...(postResult?.assetsPath && { assetsPath: postResult.assetsPath }),
               },
               null,
               2
@@ -842,6 +981,17 @@ server.tool(
       await downloadFile(audioUrl, outputPath);
       console.error(`[remotion-media-mcp] Speech saved successfully!`);
 
+      // Airtable post-generation hook
+      const postResult = await postGenerationHook({
+        remoteUrl: audioUrl,
+        localPath: outputPath,
+        filename: `${filename}.mp3`,
+        description: text,
+        fileType: "audio",
+        sourceTool: "generate_speech",
+        taskId,
+      });
+
       return {
         content: [
           {
@@ -855,6 +1005,9 @@ server.tool(
                 audioUrl,
                 voice: voice || "Eric",
                 model: model || "turbo_v2_5",
+                ...(postResult?.aid && { aid: postResult.aid }),
+                ...(postResult?.recordId && { airtableRecordId: postResult.recordId }),
+                ...(postResult?.assetsPath && { assetsPath: postResult.assetsPath }),
               },
               null,
               2
@@ -1173,10 +1326,415 @@ server.tool(
   }
 );
 
+// Tool 9: List Airtable Assets
+server.tool(
+  "list_airtable_assets",
+  "Browse assets stored in the Airtable asset library. Shows AID, filename, description, file type, and creation date. Supports filtering by file type and pagination. Requires AIRTABLE_API_KEY to be configured.",
+  {
+    file_type: z
+      .enum(["image", "video", "audio", "subtitle", "other"])
+      .optional()
+      .describe("Filter by file type"),
+    max_records: z
+      .number()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("Maximum records to return (default: 20, max: 100)"),
+    page_offset: z
+      .string()
+      .optional()
+      .describe("Pagination offset from a previous list call"),
+  },
+  async ({ file_type, max_records, page_offset }) => {
+    try {
+      const config = getAirtableConfig();
+      if (!config) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "Airtable not configured",
+                  message:
+                    "Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, and optionally AIRTABLE_TABLE_NAME environment variables to enable Airtable integration.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // Build filter formula for file type
+      let filterByFormula: string | undefined;
+      if (file_type) {
+        const mimePrefix: Record<string, string> = {
+          image: "image/",
+          video: "video/",
+          audio: "audio/",
+          subtitle: "text/",
+          other: "",
+        };
+        const prefix = mimePrefix[file_type];
+        if (prefix) {
+          filterByFormula = `SEARCH("${prefix}", {MIME Type}) > 0`;
+        }
+      }
+
+      const result = await listAirtableRecords(config, {
+        filterByFormula,
+        maxRecords: max_records || 20,
+        offset: page_offset,
+      });
+
+      const assets = result.records.map((r) => ({
+        aid: r.fields.AID || "",
+        filename: r.fields.Filename || "",
+        description: r.fields.Description || "",
+        mimeType: r.fields["MIME Type"] || "",
+        fileType: r.fields.Filename ? detectFileType(r.fields.Filename) : "other",
+        hasAttachment: Array.isArray(r.fields.File) && r.fields.File.length > 0,
+        createdAt: r.createdTime || "",
+      }));
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                count: assets.length,
+                assets,
+                ...(result.offset && { nextPageOffset: result.offset }),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text" as const, text: `Error listing Airtable assets: ${message}` }],
+      };
+    }
+  }
+);
+
+// Tool 10: Backup to Airtable
+server.tool(
+  "backup_to_airtable",
+  "Push a local file to the Airtable asset library. Supports files from assets/, out/, public/, or any relative path. Creates an Airtable record with metadata and file attachment, assigns an AID, and optionally renames the local file with the AID prefix. Requires AIRTABLE_API_KEY to be configured.",
+  {
+    file_path: z
+      .string()
+      .describe(
+        "Path to the local file (e.g., 'assets/hero.png', 'out/video.mp4', 'public/music.mp3', or any relative/absolute path)"
+      ),
+    description: z.string().describe("Description of the asset"),
+    file_type: z
+      .enum(["image", "video", "audio", "subtitle", "other"])
+      .optional()
+      .describe("File type (auto-detected from extension if not specified)"),
+    remote_url: z
+      .string()
+      .optional()
+      .describe("Optional remote URL for the file (used as attachment instead of uploading)"),
+  },
+  async ({ file_path, description, file_type, remote_url }) => {
+    try {
+      const config = getAirtableConfig();
+      if (!config) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "Airtable not configured",
+                  message:
+                    "Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, and optionally AIRTABLE_TABLE_NAME environment variables to enable Airtable integration.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // Resolve the file path - search common directories
+      let resolvedPath: string | null = null;
+      const searchDirs = ["assets", "out", "public"];
+      const cwd = process.cwd();
+
+      if (path.isAbsolute(file_path)) {
+        if (fs.existsSync(file_path)) resolvedPath = file_path;
+      } else {
+        // Try the path as-is first (relative to cwd)
+        const directPath = path.resolve(cwd, file_path);
+        if (fs.existsSync(directPath)) {
+          resolvedPath = directPath;
+        } else {
+          // Search in common directories
+          for (const dir of searchDirs) {
+            const candidate = path.resolve(cwd, dir, path.basename(file_path));
+            if (fs.existsSync(candidate)) {
+              resolvedPath = candidate;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!resolvedPath) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "File not found",
+                  message: `Could not find '${file_path}'. Searched in: ${searchDirs.join(", ")} directories and as relative/absolute path.`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      const filename = path.basename(resolvedPath);
+      const detectedType = file_type || detectFileType(filename);
+      const mimeType = getMimeType(filename);
+
+      // Create Airtable record
+      const record = await createAirtableRecord(config, {
+        description,
+        fileUrl: remote_url,
+        filename,
+        mimeType,
+      });
+
+      if (!record) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                { error: "Failed to create Airtable record" },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      const { aid, recordId } = record;
+
+      // If no remote URL, upload the file directly
+      if (!remote_url) {
+        await uploadAttachmentToAirtable(config, recordId, resolvedPath, filename);
+      }
+
+      // Rename file with AID prefix if it's in assets/ and not already prefixed
+      let renamedTo: string | undefined;
+      const parentDir = path.basename(path.dirname(resolvedPath));
+      if (parentDir === "assets" && aid && !/^A\d+-/.test(filename)) {
+        const newFilename = `${aid}-${filename}`;
+        const newPath = path.join(path.dirname(resolvedPath), newFilename);
+        fs.renameSync(resolvedPath, newPath);
+        renamedTo = newFilename;
+        console.error(`[remotion-media-mcp] Renamed ${filename} → ${newFilename}`);
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                aid,
+                recordId,
+                filename,
+                fileType: detectedType,
+                ...(renamedTo && { renamedTo }),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text" as const, text: `Error backing up to Airtable: ${message}` }],
+      };
+    }
+  }
+);
+
+// Tool 11: Copy from Airtable
+server.tool(
+  "copy_from_airtable",
+  "Pull a file from the Airtable asset library to a local directory. Look up an asset by its AID (e.g., 'A42'), download the attachment, and save it locally with the AID-prefixed filename. Requires AIRTABLE_API_KEY to be configured.",
+  {
+    aid: z
+      .string()
+      .describe("The AID of the asset to download (e.g., 'A42')"),
+    target_dir: z
+      .string()
+      .optional()
+      .describe(
+        "Target directory: 'assets' (default), 'out', 'public', or any relative/absolute path"
+      ),
+  },
+  async ({ aid, target_dir }) => {
+    try {
+      const config = getAirtableConfig();
+      if (!config) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "Airtable not configured",
+                  message:
+                    "Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, and optionally AIRTABLE_TABLE_NAME environment variables to enable Airtable integration.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // Look up record by AID
+      const record = await getAirtableRecordByAid(config, aid);
+      if (!record) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                { error: "Asset not found", message: `No asset found with AID "${aid}"` },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      // Get attachment URL
+      const files = record.fields.File;
+      if (!Array.isArray(files) || files.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  error: "No attachment",
+                  message: `Asset ${aid} exists but has no file attachment in Airtable.`,
+                  record: {
+                    aid: record.fields.AID,
+                    filename: record.fields.Filename,
+                    description: record.fields.Description,
+                  },
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      const attachmentUrl = files[0].url;
+      const originalFilename = files[0].filename || record.fields.Filename || "unknown";
+      const recordAid = record.fields.AID || aid;
+
+      // Build AID-prefixed filename
+      const aidPrefix = `${recordAid}-`;
+      const targetFilename = originalFilename.startsWith(aidPrefix)
+        ? originalFilename
+        : `${aidPrefix}${originalFilename}`;
+
+      // Resolve target directory
+      const dirName = target_dir || "assets";
+      let targetDirPath: string;
+      if (path.isAbsolute(dirName)) {
+        targetDirPath = dirName;
+      } else if (["assets", "out", "public"].includes(dirName)) {
+        targetDirPath = path.resolve(process.cwd(), dirName);
+      } else {
+        targetDirPath = path.resolve(process.cwd(), dirName);
+      }
+
+      // Ensure directory exists
+      if (!fs.existsSync(targetDirPath)) {
+        fs.mkdirSync(targetDirPath, { recursive: true });
+      }
+
+      const outputPath = path.join(targetDirPath, targetFilename);
+
+      // Download the file
+      console.error(`[remotion-media-mcp] Downloading ${recordAid} to ${outputPath}...`);
+      await downloadFile(attachmentUrl, outputPath);
+      console.error(`[remotion-media-mcp] Downloaded successfully!`);
+
+      const relativePath = path.relative(process.cwd(), outputPath);
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                aid: recordAid,
+                path: outputPath,
+                relativePath,
+                filename: targetFilename,
+                description: record.fields.Description || "",
+                mimeType: record.fields["MIME Type"] || "",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: "text" as const, text: `Error copying from Airtable: ${message}` }],
+      };
+    }
+  }
+);
+
 // Start the server
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  const airtableConfig = getAirtableConfig();
+  console.error(
+    `[remotion-media-mcp] Airtable integration: ${airtableConfig ? "enabled" : "disabled"}`
+  );
   console.error("[remotion-media-mcp] Server started");
 }
 

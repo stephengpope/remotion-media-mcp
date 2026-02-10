@@ -11,6 +11,7 @@ An MCP (Model Context Protocol) server for AI-powered media generation in Remoti
 - **Text-to-Speech** - Natural voiceovers via ElevenLabs TTS
 - **Subtitle Generation** - Transcribe audio/video to SRT via local Whisper
 - **Asset Management** - List all generated media in your project
+- **Airtable Integration** - Optional asset library with auto-tracking, AID assignment, and push/pull sync
 
 ## Installation
 
@@ -42,7 +43,10 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
       "command": "npx",
       "args": ["remotion-media-mcp"],
       "env": {
-        "KIE_API_KEY": "your-api-key-here"
+        "KIE_API_KEY": "your-api-key-here",
+        "AIRTABLE_API_KEY": "your-airtable-pat-here",
+        "AIRTABLE_BASE_ID": "appXXXXXXXXXXXXXX",
+        "AIRTABLE_TABLE_NAME": "Assets"
       }
     }
   }
@@ -54,7 +58,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 Add with a single command:
 
 ```bash
-claude mcp add remotion-media -s project -e KIE_API_KEY=your-api-key -- npx remotion-media-mcp
+claude mcp add remotion-media -s project -e KIE_API_KEY=your-api-key -e AIRTABLE_API_KEY=your-airtable-pat -e AIRTABLE_BASE_ID=appXXX -e AIRTABLE_TABLE_NAME=Assets -- npx remotion-media-mcp
 ```
 
 Or manually add to your project's `.mcp.json`:
@@ -66,12 +70,17 @@ Or manually add to your project's `.mcp.json`:
       "command": "npx",
       "args": ["remotion-media-mcp"],
       "env": {
-        "KIE_API_KEY": "your-api-key-here"
+        "KIE_API_KEY": "your-api-key-here",
+        "AIRTABLE_API_KEY": "your-airtable-pat-here",
+        "AIRTABLE_BASE_ID": "appXXXXXXXXXXXXXX",
+        "AIRTABLE_TABLE_NAME": "Assets"
       }
     }
   }
 }
 ```
+
+> **Note:** The Airtable env vars are optional. Without them, everything works exactly as before. See [Airtable Integration](#airtable-integration-optional) for setup details.
 
 ## Available Tools
 
@@ -171,6 +180,36 @@ pip install openai-whisper
 
 List all generated images, videos, and audio files in your project's `public/` folder.
 
+### `list_airtable_assets`
+
+Browse assets stored in the Airtable asset library. Requires Airtable integration to be configured.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_type` | enum | No | Filter by type: image, video, audio, subtitle, other |
+| `max_records` | number | No | Max records to return (default: 20, max: 100) |
+| `page_offset` | string | No | Pagination offset from previous call |
+
+### `backup_to_airtable`
+
+Push a local file to the Airtable asset library. Creates a record with metadata, uploads the file attachment, and assigns an AID. Files in `assets/` are automatically renamed with the AID prefix.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_path` | string | Yes | Path to local file (e.g., 'assets/hero.png', 'out/video.mp4') |
+| `description` | string | Yes | Description of the asset |
+| `file_type` | enum | No | File type (auto-detected if not specified) |
+| `remote_url` | string | No | Remote URL to use as attachment instead of uploading |
+
+### `copy_from_airtable`
+
+Pull a file from the Airtable asset library to a local directory by its AID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `aid` | string | Yes | Asset ID (e.g., 'A42') |
+| `target_dir` | string | No | Target directory: 'assets' (default), 'out', 'public', or any path |
+
 ## Output Location
 
 All generated files are saved to the `public/` directory in your current working directory, making them immediately available via Remotion's `staticFile()` function:
@@ -183,6 +222,45 @@ import { Audio, Img, Video, staticFile } from "remotion";
 <Video src={staticFile("my-video.mp4")} />
 <Audio src={staticFile("my-music.mp3")} />
 ```
+
+## Airtable Integration (Optional)
+
+Connect an Airtable base to automatically track every generated asset with a unique AID (e.g., A1, A42), store metadata, and sync files between local directories and Airtable.
+
+### Setup
+
+1. Create an [Airtable Personal Access Token](https://airtable.com/create/tokens) with `data.records:read`, `data.records:write`, and `content:manage` scopes
+2. Create an Airtable base with a table (default name: "Assets") with these fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `AID` | Formula | `"A" & {ID}` — primary display field |
+| `ID` | Auto number | Auto-incrementing integer |
+| `Filename` | Single line text | |
+| `Description` | Long text | |
+| `File` | Attachment | |
+| `MIME Type` | Single line text | |
+| `Record ID` | Formula | `RECORD_ID()` |
+
+3. Set the environment variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AIRTABLE_API_KEY` | Yes | Airtable Personal Access Token |
+| `AIRTABLE_BASE_ID` | Yes | Base ID (starts with `app...`) |
+| `AIRTABLE_TABLE_NAME` | No | Table name (default: `"Assets"`) |
+
+### How It Works
+
+- **Auto-tracking**: Every file generated by `generate_image`, `generate_video_from_text`, `generate_video_from_image`, `generate_sound_effect`, `generate_music`, and `generate_speech` is automatically registered in Airtable with its metadata and remote URL attachment
+- **AID assignment**: Each asset gets a unique AID (e.g., A1, A42) read back from the Airtable formula field
+- **Asset copy**: Generated files are copied to `assets/` with AID-prefixed filenames (e.g., `assets/A42-hero.png`) for traceability
+- **Non-blocking**: Airtable errors never break media generation — the file is always saved to `public/` regardless
+- **Push/pull**: Use `backup_to_airtable` to push local files and `copy_from_airtable` to pull files by AID
+
+### Without Airtable
+
+If `AIRTABLE_API_KEY` is not set, the MCP works exactly as before. Generation tools save to `public/` only, and the three Airtable tools return a "not configured" message.
 
 ## Development
 
