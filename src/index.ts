@@ -173,6 +173,60 @@ function getWhisperCommand(): { cmd: string; type: "whisper-cpp" | "openai-whisp
   return null;
 }
 
+// Poll for Seedance video task completion (uses standard job endpoint)
+async function pollSeedanceTaskStatus(
+  taskId: string,
+  apiKey: string,
+  maxAttempts = 180,
+  intervalMs = 5000
+): Promise<{ success: boolean; videoUrl?: string; error?: string }> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(
+      `${API_BASE}/api/v1/jobs/recordInfo?taskId=${taskId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
+    );
+
+    const result = await response.json();
+
+    if (result.code !== 200) {
+      return { success: false, error: `API error: ${result.msg}` };
+    }
+
+    const state = result.data?.state;
+
+    if (state === "success") {
+      // Extract video URL from resultJson
+      try {
+        const resultJson = JSON.parse(result.data.resultJson);
+        const videoUrl = resultJson.resultUrls?.[0] || resultJson.video_url || resultJson.videoUrl;
+        if (videoUrl) {
+          return { success: true, videoUrl };
+        }
+        return { success: false, error: "No video URL in response" };
+      } catch {
+        return { success: false, error: "Failed to parse result" };
+      }
+    }
+
+    if (state === "fail") {
+      return {
+        success: false,
+        error: result.data?.failMsg || "Task failed",
+      };
+    }
+
+    // Still waiting, continue polling
+    console.error(`[remotion-media-mcp] Seedance task ${taskId} status: ${state}, waiting...`);
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  return { success: false, error: "Seedance video generation timed out" };
+}
+
 // Poll for Veo video task completion
 async function pollVeoTaskStatus(
   taskId: string,
@@ -411,57 +465,128 @@ server.tool(
   }
 );
 
-// Tool 2: Generate Video from Text using Veo 3.1
+// Tool 2: Generate Video from Text using Veo 3.1 or Seedance
 server.tool(
   "generate_video_from_text",
-  "Generate an AI video from a text description. Use for: explainer clips, b-roll footage, animated scenes, product demos, or any video content. Creates ~8 second clips. Choose 'veo3' for quality or 'veo3_fast' for speed. Supports 16:9 (landscape), 9:16 (portrait/mobile). Returns downloaded MP4 path in public/ folder.",
+  "Generate an AI video from a text description. Use for: explainer clips, b-roll footage, animated scenes, product demos, or any video content. Models: 'veo3'/'veo3_fast' (Google, ~8s clips), 'seedance_2' (ByteDance, 4-15s, native audio, best motion), 'seedance_1_5_pro' (ByteDance, 4-12s, with audio). Supports 16:9, 9:16, and more. Returns downloaded MP4 path in public/ folder.",
   {
     prompt: z.string().describe("Text description of the video to generate"),
     output_name: z.string().describe("Output filename without extension (required)"),
     model: z
-      .enum(["veo3", "veo3_fast"])
+      .enum(["veo3", "veo3_fast", "seedance_2", "seedance_1_5_pro"])
       .optional()
-      .describe("Model to use. veo3 = Quality, veo3_fast = Fast. Defaults to veo3_fast"),
+      .describe("Model to use. veo3/veo3_fast = Google Veo. seedance_2 = ByteDance Seedance 2.0 (best quality, native audio). seedance_1_5_pro = Seedance 1.5 Pro. Defaults to veo3_fast"),
     aspect_ratio: z
-      .enum(["16:9", "9:16", "Auto"])
+      .enum(["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "Auto"])
       .optional()
-      .describe("Video aspect ratio. Defaults to 16:9"),
+      .describe("Video aspect ratio. Seedance supports all ratios. Veo supports 16:9, 9:16, Auto. Defaults to 16:9"),
+    duration: z
+      .enum(["4", "8", "12", "15"])
+      .optional()
+      .describe("Video duration in seconds (Seedance only). seedance_1_5_pro: 4/8/12. seedance_2: 4-15. Ignored for Veo."),
+    resolution: z
+      .enum(["480p", "720p", "1080p", "2k"])
+      .optional()
+      .describe("Video resolution (Seedance only). seedance_1_5_pro: 480p/720p/1080p. seedance_2: up to 2k. Defaults to 1080p"),
+    generate_audio: z
+      .boolean()
+      .optional()
+      .describe("Generate native audio with video (Seedance only). Seedance 2.0 has superior audio-video sync. Defaults to false"),
   },
-  async ({ prompt, output_name, model, aspect_ratio }) => {
+  async ({ prompt, output_name, model, aspect_ratio, duration, resolution, generate_audio }) => {
     try {
       const apiKey = getApiKey();
-      console.error(`[remotion-media-mcp] Starting text-to-video generation: "${prompt.substring(0, 50)}..."`);
+      const selectedModel = model || "veo3_fast";
+      const isSeedance = selectedModel.startsWith("seedance");
 
-      // Create video generation task
-      const createResponse = await fetch(`${API_BASE}/api/v1/veo/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
+      console.error(`[remotion-media-mcp] Starting text-to-video generation with ${selectedModel}: "${prompt.substring(0, 50)}..."`);
+
+      let taskId: string;
+      let pollResult: { success: boolean; videoUrl?: string; error?: string };
+
+      if (isSeedance) {
+        // Seedance API via jobs/createTask
+        const seedanceModel = selectedModel === "seedance_2"
+          ? "bytedance/seedance-2.0"
+          : "bytedance/seedance-1.5-pro";
+
+        // Map aspect ratio for Seedance (same format, but ensure valid)
+        const seedanceAspectRatio = aspect_ratio === "Auto" ? "16:9" : (aspect_ratio || "16:9");
+
+        const input: Record<string, any> = {
           prompt,
-          model: model || "veo3_fast",
-          generationType: "TEXT_2_VIDEO",
-          aspect_ratio: aspect_ratio || "16:9",
-          enableTranslation: true,
-        }),
-      });
-
-      const createResult = await createResponse.json();
-      console.error(`[remotion-media-mcp] API response:`, JSON.stringify(createResult, null, 2));
-
-      if (createResult.code !== 200) {
-        return {
-          content: [{ type: "text" as const, text: `Error creating video task: ${createResult.msg || JSON.stringify(createResult)}` }],
+          aspect_ratio: seedanceAspectRatio,
         };
+
+        // Add optional parameters
+        if (duration) {
+          input.duration = parseInt(duration, 10);
+        }
+        if (resolution) {
+          input.resolution = resolution;
+        }
+        if (generate_audio !== undefined) {
+          input.generate_audio = generate_audio;
+        }
+
+        const createResponse = await fetch(`${API_BASE}/api/v1/jobs/createTask`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: seedanceModel,
+            input,
+          }),
+        });
+
+        const createResult = await createResponse.json();
+        console.error(`[remotion-media-mcp] Seedance API response:`, JSON.stringify(createResult, null, 2));
+
+        if (createResult.code !== 200) {
+          return {
+            content: [{ type: "text" as const, text: `Error creating Seedance task: ${createResult.msg || JSON.stringify(createResult)}` }],
+          };
+        }
+
+        taskId = createResult.data.taskId;
+        console.error(`[remotion-media-mcp] Seedance video task created: ${taskId}`);
+
+        // Poll for Seedance completion
+        pollResult = await pollSeedanceTaskStatus(taskId, apiKey);
+      } else {
+        // Veo API (existing logic)
+        const createResponse = await fetch(`${API_BASE}/api/v1/veo/generate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            prompt,
+            model: selectedModel,
+            generationType: "TEXT_2_VIDEO",
+            aspect_ratio: aspect_ratio || "16:9",
+            enableTranslation: true,
+          }),
+        });
+
+        const createResult = await createResponse.json();
+        console.error(`[remotion-media-mcp] Veo API response:`, JSON.stringify(createResult, null, 2));
+
+        if (createResult.code !== 200) {
+          return {
+            content: [{ type: "text" as const, text: `Error creating video task: ${createResult.msg || JSON.stringify(createResult)}` }],
+          };
+        }
+
+        taskId = createResult.data.taskId;
+        console.error(`[remotion-media-mcp] Video task created: ${taskId}`);
+
+        // Poll for Veo completion
+        pollResult = await pollVeoTaskStatus(taskId, apiKey);
       }
-
-      const taskId = createResult.data.taskId;
-      console.error(`[remotion-media-mcp] Video task created: ${taskId}`);
-
-      // Poll for completion
-      const pollResult = await pollVeoTaskStatus(taskId, apiKey);
 
       if (!pollResult.success) {
         return {
@@ -497,6 +622,7 @@ server.tool(
                 success: true,
                 path: outputPath,
                 relativePath: `public/${filename}.mp4`,
+                model: selectedModel,
                 taskId,
                 videoUrl: pollResult.videoUrl,
                 ...(postResult?.aid && { aid: postResult.aid }),
@@ -518,66 +644,155 @@ server.tool(
   }
 );
 
-// Tool 3: Generate Video from Image using Veo 3.1
+// Tool 3: Generate Video from Image using Veo 3.1 or Seedance
 server.tool(
   "generate_video_from_image",
-  "Animate a still image into video, or create a video transition between two images. Use for: bringing photos to life, creating parallax effects, morphing between scenes, or animating illustrations. Pass 1 image URL to animate it, or 2 image URLs to transition from first to last frame. Returns downloaded MP4 path in public/ folder.",
+  "Animate a still image into video, or create a video transition between two images. Use for: bringing photos to life, creating parallax effects, morphing between scenes, or animating illustrations. Models: 'veo3'/'veo3_fast' (1-2 images), 'seedance_2' (up to 5 images, best motion/consistency), 'seedance_1_5_pro' (1-2 images, with audio). Returns downloaded MP4 path in public/ folder.",
   {
     prompt: z.string().describe("Text description of how the video should animate/transition"),
     image_urls: z
       .array(z.string())
       .min(1)
-      .max(2)
-      .describe("1-2 image URLs. 1 image = animate it. 2 images = transition from first to last frame."),
+      .max(5)
+      .describe("1-5 image URLs. Veo: 1-2 images. Seedance 1.5: 1-2 images. Seedance 2.0: up to 5 reference images."),
     output_name: z.string().describe("Output filename without extension (required)"),
     model: z
-      .enum(["veo3", "veo3_fast"])
+      .enum(["veo3", "veo3_fast", "seedance_2", "seedance_1_5_pro"])
       .optional()
-      .describe("Model to use. veo3 = Quality, veo3_fast = Fast. Defaults to veo3_fast"),
+      .describe("Model to use. veo3/veo3_fast = Google Veo. seedance_2 = ByteDance Seedance 2.0 (best quality, up to 5 images). seedance_1_5_pro = Seedance 1.5 Pro. Defaults to veo3_fast"),
     aspect_ratio: z
-      .enum(["16:9", "9:16", "Auto"])
+      .enum(["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "Auto"])
       .optional()
-      .describe("Video aspect ratio. Defaults to 16:9"),
+      .describe("Video aspect ratio. Seedance supports all ratios. Veo supports 16:9, 9:16, Auto. Defaults to 16:9"),
+    duration: z
+      .enum(["4", "8", "12", "15"])
+      .optional()
+      .describe("Video duration in seconds (Seedance only). seedance_1_5_pro: 4/8/12. seedance_2: 4-15. Ignored for Veo."),
+    resolution: z
+      .enum(["480p", "720p", "1080p", "2k"])
+      .optional()
+      .describe("Video resolution (Seedance only). seedance_1_5_pro: 480p/720p/1080p. seedance_2: up to 2k. Defaults to 1080p"),
+    generate_audio: z
+      .boolean()
+      .optional()
+      .describe("Generate native audio with video (Seedance only). Seedance 2.0 has superior audio-video sync with lip-sync. Defaults to false"),
+    fixed_lens: z
+      .boolean()
+      .optional()
+      .describe("Lock camera for static shots (Seedance 1.5 Pro only). Useful for product shots or interviews. Defaults to false"),
   },
-  async ({ prompt, image_urls, output_name, model, aspect_ratio }) => {
+  async ({ prompt, image_urls, output_name, model, aspect_ratio, duration, resolution, generate_audio, fixed_lens }) => {
     try {
       const apiKey = getApiKey();
-      console.error(`[remotion-media-mcp] Starting image-to-video generation with ${image_urls.length} image(s)...`);
+      const selectedModel = model || "veo3_fast";
+      const isSeedance = selectedModel.startsWith("seedance");
 
-      // Determine generation type based on number of images
-      const generationType = image_urls.length === 1 ? "IMAGE_2_VIDEO" : "FIRST_AND_LAST_FRAMES_2_VIDEO";
+      console.error(`[remotion-media-mcp] Starting image-to-video generation with ${selectedModel} and ${image_urls.length} image(s)...`);
 
-      // Create video generation task
-      const createResponse = await fetch(`${API_BASE}/api/v1/veo/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          prompt,
-          imageUrls: image_urls,
-          model: model || "veo3_fast",
-          generationType,
-          aspect_ratio: aspect_ratio || "16:9",
-          enableTranslation: true,
-        }),
-      });
-
-      const createResult = await createResponse.json();
-      console.error(`[remotion-media-mcp] API response:`, JSON.stringify(createResult, null, 2));
-
-      if (createResult.code !== 200) {
+      // Validate image count for each model
+      if (!isSeedance && image_urls.length > 2) {
         return {
-          content: [{ type: "text" as const, text: `Error creating video task: ${createResult.msg || JSON.stringify(createResult)}` }],
+          content: [{ type: "text" as const, text: `Error: Veo models support max 2 images. Use seedance_2 for up to 5 images.` }],
+        };
+      }
+      if (selectedModel === "seedance_1_5_pro" && image_urls.length > 2) {
+        return {
+          content: [{ type: "text" as const, text: `Error: Seedance 1.5 Pro supports max 2 images. Use seedance_2 for up to 5 images.` }],
         };
       }
 
-      const taskId = createResult.data.taskId;
-      console.error(`[remotion-media-mcp] Video task created: ${taskId}`);
+      let taskId: string;
+      let pollResult: { success: boolean; videoUrl?: string; error?: string };
 
-      // Poll for completion
-      const pollResult = await pollVeoTaskStatus(taskId, apiKey);
+      if (isSeedance) {
+        // Seedance API via jobs/createTask
+        const seedanceModel = selectedModel === "seedance_2"
+          ? "bytedance/seedance-2.0"
+          : "bytedance/seedance-1.5-pro";
+
+        const seedanceAspectRatio = aspect_ratio === "Auto" ? "16:9" : (aspect_ratio || "16:9");
+
+        const input: Record<string, any> = {
+          prompt,
+          input_urls: image_urls,
+          aspect_ratio: seedanceAspectRatio,
+        };
+
+        // Add optional parameters
+        if (duration) {
+          input.duration = parseInt(duration, 10);
+        }
+        if (resolution) {
+          input.resolution = resolution;
+        }
+        if (generate_audio !== undefined) {
+          input.generate_audio = generate_audio;
+        }
+        if (fixed_lens !== undefined && selectedModel === "seedance_1_5_pro") {
+          input.fixed_lens = fixed_lens;
+        }
+
+        const createResponse = await fetch(`${API_BASE}/api/v1/jobs/createTask`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: seedanceModel,
+            input,
+          }),
+        });
+
+        const createResult = await createResponse.json();
+        console.error(`[remotion-media-mcp] Seedance API response:`, JSON.stringify(createResult, null, 2));
+
+        if (createResult.code !== 200) {
+          return {
+            content: [{ type: "text" as const, text: `Error creating Seedance task: ${createResult.msg || JSON.stringify(createResult)}` }],
+          };
+        }
+
+        taskId = createResult.data.taskId;
+        console.error(`[remotion-media-mcp] Seedance video task created: ${taskId}`);
+
+        // Poll for Seedance completion
+        pollResult = await pollSeedanceTaskStatus(taskId, apiKey);
+      } else {
+        // Veo API (existing logic)
+        const generationType = image_urls.length === 1 ? "IMAGE_2_VIDEO" : "FIRST_AND_LAST_FRAMES_2_VIDEO";
+
+        const createResponse = await fetch(`${API_BASE}/api/v1/veo/generate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            prompt,
+            imageUrls: image_urls,
+            model: selectedModel,
+            generationType,
+            aspect_ratio: aspect_ratio || "16:9",
+            enableTranslation: true,
+          }),
+        });
+
+        const createResult = await createResponse.json();
+        console.error(`[remotion-media-mcp] Veo API response:`, JSON.stringify(createResult, null, 2));
+
+        if (createResult.code !== 200) {
+          return {
+            content: [{ type: "text" as const, text: `Error creating video task: ${createResult.msg || JSON.stringify(createResult)}` }],
+          };
+        }
+
+        taskId = createResult.data.taskId;
+        console.error(`[remotion-media-mcp] Video task created: ${taskId}`);
+
+        // Poll for Veo completion
+        pollResult = await pollVeoTaskStatus(taskId, apiKey);
+      }
 
       if (!pollResult.success) {
         return {
@@ -613,6 +828,7 @@ server.tool(
                 success: true,
                 path: outputPath,
                 relativePath: `public/${filename}.mp4`,
+                model: selectedModel,
                 taskId,
                 videoUrl: pollResult.videoUrl,
                 ...(postResult?.aid && { aid: postResult.aid }),
