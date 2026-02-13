@@ -5,7 +5,10 @@ An MCP (Model Context Protocol) server for AI-powered media generation in Remoti
 ## Features
 
 - **Image Generation** - AI images via Nano Banana Pro
-- **Video Generation** - Text-to-video and image-to-video via Veo 3.1
+- **Video Generation** - Text-to-video and image-to-video via Veo 3.1 or ByteDance Seedance
+  - **Veo 3.1** - Google's video model, ~8 second clips
+  - **Seedance 2.0** - ByteDance's latest model with native audio, 4-15 second clips, 2K resolution, multi-shot consistency
+  - **Seedance 1.5 Pro** - Reliable model with audio support, 4-12 second clips
 - **Music Generation** - AI music via Suno (V3.5 - V5)
 - **Sound Effects** - AI sound effects via ElevenLabs SFX V2
 - **Text-to-Speech** - Natural voiceovers via ElevenLabs TTS
@@ -97,26 +100,50 @@ Generate AI images using Nano Banana Pro.
 
 ### `generate_video_from_text`
 
-Generate videos from text prompts using Veo 3.1.
+Generate videos from text prompts using Veo 3.1 or ByteDance Seedance.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | Yes | Text description of the video |
 | `output_name` | string | Yes | Output filename (without extension) |
-| `model` | enum | No | veo3 (quality) or veo3_fast (default) |
-| `aspect_ratio` | enum | No | 16:9 (default), 9:16, Auto |
+| `model` | enum | No | `veo3`, `veo3_fast` (default), `seedance_2`, `seedance_1_5_pro` |
+| `aspect_ratio` | enum | No | 1:1, 4:3, 3:4, 16:9 (default), 9:16, 21:9, Auto |
+| `duration` | enum | No | Video duration: 4, 8, 12, 15 seconds (Seedance only) |
+| `resolution` | enum | No | 480p, 720p, 1080p, 2k (Seedance only, default: 1080p) |
+| `generate_audio` | boolean | No | Generate native audio with video (Seedance only) |
+
+**Model comparison:**
+
+| Model | Duration | Resolution | Audio | Notes |
+|-------|----------|------------|-------|-------|
+| `veo3` | ~8s | 1080p | No | Google Veo, highest quality |
+| `veo3_fast` | ~8s | 1080p | No | Google Veo, faster generation |
+| `seedance_2` | 4-15s | Up to 2K | Yes | ByteDance latest, best motion & consistency |
+| `seedance_1_5_pro` | 4-12s | Up to 1080p | Yes | ByteDance, reliable with audio sync |
 
 ### `generate_video_from_image`
 
-Animate images or create transitions between frames using Veo 3.1.
+Animate images or create transitions between frames using Veo 3.1 or ByteDance Seedance.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | Yes | Description of the animation |
-| `image_urls` | string[] | Yes | 1-2 image URLs |
+| `image_urls` | string[] | Yes | 1-5 image URLs (see model limits below) |
 | `output_name` | string | Yes | Output filename (without extension) |
-| `model` | enum | No | veo3 (quality) or veo3_fast (default) |
-| `aspect_ratio` | enum | No | 16:9 (default), 9:16, Auto |
+| `model` | enum | No | `veo3`, `veo3_fast` (default), `seedance_2`, `seedance_1_5_pro` |
+| `aspect_ratio` | enum | No | 1:1, 4:3, 3:4, 16:9 (default), 9:16, 21:9, Auto |
+| `duration` | enum | No | Video duration: 4, 8, 12, 15 seconds (Seedance only) |
+| `resolution` | enum | No | 480p, 720p, 1080p, 2k (Seedance only, default: 1080p) |
+| `generate_audio` | boolean | No | Generate native audio with video (Seedance only) |
+| `fixed_lens` | boolean | No | Lock camera for static shots (Seedance 1.5 Pro only) |
+
+**Image limits by model:**
+
+| Model | Max Images | Notes |
+|-------|------------|-------|
+| `veo3` / `veo3_fast` | 2 | 1 image = animate, 2 images = transition |
+| `seedance_1_5_pro` | 2 | 1-2 reference images |
+| `seedance_2` | 5 | Up to 5 reference images for multi-shot consistency |
 
 ### `generate_music`
 
