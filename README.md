@@ -1,39 +1,51 @@
 # Remotion Media MCP
 
-An MCP (Model Context Protocol) server for AI-powered media generation in Remotion projects. Generate images, videos, music, and sound effects directly from Claude or any MCP-compatible client.
+An MCP (Model Context Protocol) server for AI-powered media generation. Generate images, videos, music, sound effects, speech, and subtitles directly from Claude or any MCP-compatible client.
 
-## Features
+All generated files save to `public/` — ready for Remotion's `staticFile()` or any other use.
 
-- **Image Generation** - AI images via Nano Banana Pro
-- **Video Generation** - Text-to-video and image-to-video via Veo 3.1
-- **Music Generation** - AI music via Suno (V3.5 - V5)
-- **Sound Effects** - AI sound effects via ElevenLabs SFX V2
-- **Text-to-Speech** - Natural voiceovers via ElevenLabs TTS
-- **Subtitle Generation** - Transcribe audio/video to SRT via local Whisper
-- **Asset Library** - Browse, back up, and pull assets with AID tracking via optional Airtable integration
+## Quick Start
 
-## Installation
+### Install globally
 
 ```bash
 npm install -g remotion-media-mcp
 ```
 
-Or use with npx:
+### Add to Claude Code
+
+If installed globally or via npx:
 
 ```bash
-npx remotion-media-mcp
+claude mcp add remotion-media \
+  -e KIE_API_KEY=your-api-key \
+  -- npx remotion-media-mcp
 ```
 
-## Configuration
+If cloned and built locally:
 
-### Get an API Key
+```bash
+claude mcp add remotion-media \
+  -e KIE_API_KEY=your-api-key \
+  -- node /path/to/remotion-media-mcp/dist/index.js
+```
 
-1. Sign up at [kie.ai](https://kie.ai)
-2. Get your API key from the dashboard
+With optional Airtable asset tracking:
 
-### Claude Desktop
+```bash
+claude mcp add remotion-media \
+  -e KIE_API_KEY=your-api-key \
+  -e AIRTABLE_API_KEY=your-airtable-pat \
+  -e AIRTABLE_BASE_ID=appXXX \
+  -e AIRTABLE_TABLE_NAME=Assets \
+  -- npx remotion-media-mcp
+```
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+> By default this adds at user scope (`-s user`). Add `-s project` to scope it to the current project only.
+
+### Add to Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
 ```json
 {
@@ -42,25 +54,14 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
       "command": "npx",
       "args": ["remotion-media-mcp"],
       "env": {
-        "KIE_API_KEY": "your-api-key-here",
-        "AIRTABLE_API_KEY": "your-airtable-pat-here",
-        "AIRTABLE_BASE_ID": "appXXXXXXXXXXXXXX",
-        "AIRTABLE_TABLE_NAME": "Assets"
+        "KIE_API_KEY": "your-api-key-here"
       }
     }
   }
 }
 ```
 
-### Claude Code (CLI)
-
-Add with a single command:
-
-```bash
-claude mcp add remotion-media -s project -e KIE_API_KEY=your-api-key -e AIRTABLE_API_KEY=your-airtable-pat -e AIRTABLE_BASE_ID=appXXX -e AIRTABLE_TABLE_NAME=Assets -- npx remotion-media-mcp
-```
-
-Or manually add to your project's `.mcp.json`:
+### Add to `.mcp.json`
 
 ```json
 {
@@ -69,23 +70,22 @@ Or manually add to your project's `.mcp.json`:
       "command": "npx",
       "args": ["remotion-media-mcp"],
       "env": {
-        "KIE_API_KEY": "your-api-key-here",
-        "AIRTABLE_API_KEY": "your-airtable-pat-here",
-        "AIRTABLE_BASE_ID": "appXXXXXXXXXXXXXX",
-        "AIRTABLE_TABLE_NAME": "Assets"
+        "KIE_API_KEY": "your-api-key-here"
       }
     }
   }
 }
 ```
 
-> **Note:** The Airtable env vars are optional. Without them, everything works exactly as before. See [Airtable Integration](#airtable-integration-optional) for setup details.
+## API Key
 
-## Available Tools
+Get a KIE_API_KEY from [kie.ai](https://kie.ai) — sign up and grab your key from the dashboard.
+
+## Tools
 
 ### `generate_image`
 
-Generate AI images using Nano Banana Pro.
+Generate AI images via Nano Banana Pro.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -97,30 +97,30 @@ Generate AI images using Nano Banana Pro.
 
 ### `generate_video_from_text`
 
-Generate videos from text prompts using Veo 3.1.
+Text-to-video via Veo 3.1. Creates ~8 second clips.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | Yes | Text description of the video |
 | `output_name` | string | Yes | Output filename (without extension) |
-| `model` | enum | No | veo3 (quality) or veo3_fast (default) |
+| `model` | enum | No | veo3 (quality) or veo3_fast (speed, default) |
 | `aspect_ratio` | enum | No | 16:9 (default), 9:16, Auto |
 
 ### `generate_video_from_image`
 
-Animate images or create transitions between frames using Veo 3.1.
+Animate a still image or transition between two images via Veo 3.1.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | Yes | Description of the animation |
 | `image_urls` | string[] | Yes | 1-2 image URLs |
 | `output_name` | string | Yes | Output filename (without extension) |
-| `model` | enum | No | veo3 (quality) or veo3_fast (default) |
+| `model` | enum | No | veo3 (quality) or veo3_fast (speed, default) |
 | `aspect_ratio` | enum | No | 16:9 (default), 9:16, Auto |
 
 ### `generate_music`
 
-Generate AI music using Suno.
+Generate AI music via Suno.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -131,7 +131,7 @@ Generate AI music using Suno.
 
 ### `generate_sound_effect`
 
-Generate AI sound effects using ElevenLabs SFX V2.
+Generate sound effects via ElevenLabs SFX V2.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -142,140 +142,117 @@ Generate AI sound effects using ElevenLabs SFX V2.
 
 ### `generate_speech`
 
-Convert text to natural-sounding speech using ElevenLabs TTS.
+Text-to-speech via ElevenLabs TTS. 21 voices available.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `text` | string | Yes | Text to convert to speech (max 5000 chars) |
+| `text` | string | Yes | Text to convert (max 5000 chars) |
 | `output_name` | string | Yes | Output filename (without extension) |
-| `voice` | enum | No | Voice name (default: Eric). Options: Rachel, Aria, Roger, Sarah, Laura, Charlie, George, Callum, River, Liam, Charlotte, Alice, Matilda, Will, Jessica, Eric, Chris, Brian, Daniel, Lily, Bill |
-| `model` | enum | No | multilingual_v2 (quality) or turbo_v2_5 (default, faster) |
+| `voice` | enum | No | Default: Eric. Options: Rachel, Aria, Roger, Sarah, Laura, Charlie, George, Callum, River, Liam, Charlotte, Alice, Matilda, Will, Jessica, Eric, Chris, Brian, Daniel, Lily, Bill |
+| `model` | enum | No | multilingual_v2 (quality) or turbo_v2_5 (faster, default) |
 | `stability` | number | No | Voice stability 0-1 (default: 0.5) |
 | `similarity_boost` | number | No | Voice similarity 0-1 (default: 0.75) |
 | `speed` | number | No | Speech speed 0.7-1.2 (default: 1.0) |
 
 ### `generate_subtitles`
 
-Transcribe audio/video files to SRT subtitles using local Whisper. Requires [whisper.cpp](https://github.com/ggerganov/whisper.cpp) or [OpenAI Whisper](https://github.com/openai/whisper) to be installed.
+Transcribe audio/video to SRT subtitles using local Whisper.
+
+Requires [whisper.cpp](https://github.com/ggerganov/whisper.cpp) or [OpenAI Whisper](https://github.com/openai/whisper):
 
 ```bash
-# Install whisper.cpp (recommended)
-brew install whisper-cpp
-
-# Or install OpenAI Whisper
+brew install whisper-cpp    # recommended
+# or
 pip install openai-whisper
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `input_file` | string | Yes | Filename in public/ folder (e.g., 'video.mp4') |
-| `output_name` | string | No | Output filename without extension (default: input filename) |
-| `language` | string | No | Language code e.g., 'en', 'es', 'fr' (default: auto-detect) |
+| `input_file` | string | Yes | Filename in public/ folder |
+| `output_name` | string | No | Output filename without extension |
+| `language` | string | No | Language code e.g., 'en', 'es' (default: auto-detect) |
 | `model` | enum | No | tiny, base (default), small, medium, large |
-
-**Note:** Models are automatically downloaded on first use (~75MB for base model).
 
 ### `list_assets`
 
-Browse assets stored in the asset library. Requires Airtable integration to be configured.
+Browse assets in the Airtable asset library.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file_type` | enum | No | Filter by type: image, video, audio, subtitle, other |
-| `max_records` | number | No | Max records to return (default: 20, max: 100) |
-| `page_offset` | string | No | Pagination offset from previous call |
+| `file_type` | enum | No | Filter: image, video, audio, subtitle, other |
+| `max_records` | number | No | Max records (default: 20, max: 100) |
+| `page_offset` | string | No | Pagination offset |
 
 ### `backup_asset`
 
-Back up a local file to the asset library. Creates a record with metadata, uploads the file attachment, and assigns an AID. Files in `assets/` are automatically renamed with the AID prefix.
+Back up a local file to the asset library. Assigns an AID and optionally renames with AID prefix.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file_path` | string | Yes | Path to local file (e.g., 'assets/hero.png', 'out/video.mp4') |
+| `file_path` | string | Yes | Path to local file |
 | `description` | string | Yes | Description of the asset |
-| `file_type` | enum | No | File type (auto-detected if not specified) |
-| `remote_url` | string | No | Remote URL to use as attachment instead of uploading |
+| `file_type` | enum | No | Auto-detected from extension |
+| `remote_url` | string | No | Remote URL instead of uploading |
 
 ### `get_asset`
 
-Pull an asset from the library by its AID.
+Pull an asset from the library by AID.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `aid` | string | Yes | Asset ID (e.g., 'A42') |
-| `target_dir` | string | No | Target directory: 'assets' (default), 'out', 'public', or any path |
+| `target_dir` | string | No | Target: 'assets' (default), 'out', 'public' |
 
-## Output Location
+## Using with Remotion
 
-All generated files are saved to the `public/` directory in your current working directory, making them immediately available via Remotion's `staticFile()` function:
+Generated files land in `public/` and work directly with `staticFile()`:
 
 ```tsx
-import { Audio, Img, Video, staticFile } from "remotion";
+import { Img, Video, Audio, staticFile } from "remotion";
 
-// Use generated assets
-<Img src={staticFile("my-image.png")} />
-<Video src={staticFile("my-video.mp4")} />
-<Audio src={staticFile("my-music.mp3")} />
+<Img src={staticFile("hero.png")} />
+<Video src={staticFile("intro.mp4")} />
+<Audio src={staticFile("bgm.mp3")} />
 ```
 
 ## Airtable Integration (Optional)
 
-Connect an Airtable base to automatically track every generated asset with a unique AID (e.g., A1, A42), store metadata, and sync files between local directories and Airtable.
+Connect Airtable to auto-track every generated asset with a unique AID.
 
 ### Setup
 
 1. Create an [Airtable Personal Access Token](https://airtable.com/create/tokens) with `data.records:read`, `data.records:write`, and `content:manage` scopes
-2. Create an Airtable base with a table (default name: "Assets") with these fields:
+2. Create a base with a table (default name: "Assets") with these fields:
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `AID` | Formula | `"A" & {ID}` — primary display field |
-| `ID` | Auto number | Auto-incrementing integer |
+| `AID` | Formula | `"A" & {ID}` |
+| `ID` | Auto number | |
 | `Filename` | Single line text | |
 | `Description` | Long text | |
 | `File` | Attachment | |
 | `MIME Type` | Single line text | |
 | `Record ID` | Formula | `RECORD_ID()` |
 
-3. Set the environment variables:
+3. Set the env vars: `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, and optionally `AIRTABLE_TABLE_NAME`
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `AIRTABLE_API_KEY` | Yes | Airtable Personal Access Token |
-| `AIRTABLE_BASE_ID` | Yes | Base ID (starts with `app...`) |
-| `AIRTABLE_TABLE_NAME` | No | Table name (default: `"Assets"`) |
+Without Airtable configured, everything works normally — generation tools save to `public/` and asset library tools return a "not configured" message.
 
-### How It Works
-
-- **Auto-tracking**: Every file generated by `generate_image`, `generate_video_from_text`, `generate_video_from_image`, `generate_sound_effect`, `generate_music`, and `generate_speech` is automatically registered in Airtable with its metadata and remote URL attachment
-- **AID assignment**: Each asset gets a unique AID (e.g., A1, A42) read back from the Airtable formula field
-- **Asset copy**: Generated files are copied to `assets/` with AID-prefixed filenames (e.g., `assets/A42-hero.png`) for traceability
-- **Non-blocking**: Airtable errors never break media generation — the file is always saved to `public/` regardless
-- **Push/pull**: Use `backup_asset` to push local files and `get_asset` to pull files by AID
-
-### Limitations
-
-Airtable attachments are limited to 5MB on free plans and 100MB on paid plans. For larger files (long videos, lossless audio), a future version may support S3 or similar object storage as an intermediary, with Airtable storing only the metadata and a reference URL.
-
-### Without Airtable
-
-If `AIRTABLE_API_KEY` is not set, the MCP works exactly as before. Generation tools save to `public/` only, and the asset library tools (`list_assets`, `backup_asset`, `get_asset`) return a "not configured" message.
-
-## Development
+## Local Development
 
 ```bash
-# Clone the repo
 git clone https://github.com/stephengpope/remotion-media-mcp.git
 cd remotion-media-mcp
-
-# Install dependencies
 npm install
-
-# Build
 npm run build
 
 # Run locally
 KIE_API_KEY=your-key node dist/index.js
+
+# Add your local build to Claude Code
+claude mcp add remotion-media \
+  -e KIE_API_KEY=your-key \
+  -- node $PWD/dist/index.js
 ```
 
 ## License
